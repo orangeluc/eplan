@@ -1,0 +1,294 @@
+$Title Energy planning model for biobased urban energy system
+$ontext
+(Bio-based) Urban Energy System Model
+Y.J.
+Created on 30.08.16
+Version: for robustness check
+$offtext
+
+
+sets
+    f                energy fuel types /co,waste,gas/
+    r                city districts /Centrum, West, Nieuw-West, West-poort, Zuid, Oost, Noord, Zuidoost/
+    v                vintage of technologies /old,2010,2015,2020,2025,2030,2035,2040,2045,2050/
+    t                investment time horizon /2010,2015,2020,2025,2030,2035,2040,2045,2050/
+*   t                investment time horizon /2010,2015,2020,2025,2030,2035,2040,2045,2050,2055,2060,2065,2070, 2075, 2080, 2085, 2090, 2095, 2100  /
+    tau              time slice for each representative day /low-day,low-night,high-day,high-night/
+*low consumption seasons in the Netherlands (May,June,July,August,September,October)
+*high consumption seasons in the Netherlands (November, December, January, February, March, April)
+    i                energy system technologies /Wind,Solar-PV,CAES,Biogas,Coal/
+    a(i)             electricity generation technologies /Wind,Solar-PV,Biogas,Coal/
+    j(a)             energy generation technologies that require fuel/Biogas,Coal/
+    store(i)         energy storage technologies/CAES/
+*   pro(i)           technologies that have potential improvement /Wind,Solar-PV,Biogas/
+*    npro(i)          technologies without progress potential   /Coal,CCGT,WtE-CHP,Bio-CHP/
+    emi              emission type /CO2,SO2/
+*    type             energy demand or import type /green, grey/
+*    repr             set of representative days /repr1*repr12/
+
+;
+$call gdxxrw.exe data.xlsx par=alpha rng=alpha!A1:C41 rdim=2 cdim=1
+parameter
+alpha(r,i,v)   Unit:M€ per MW. Unit investment cost for technology i in period v in district r  ;
+$GDXIN data.gdx
+$LOAD alpha
+$GDXIN
+display alpha
+;
+$call gdxxrw.exe data.xlsx par=beta rng=beta!A1:D41 rdim=3 cdim=1
+parameter
+beta(r,i,v,t)    Unit: M€ per MW per year. Fixed O&M cost for technology i of vintage v in period t in district r ;
+$GDXIN data.gdx
+$LOAD beta
+$GDXIN
+options beta:0:3:1
+display beta
+;
+$call gdxxrw.exe data.xlsx par=gamma rng=gamma!A1:D41 rdim=3 cdim=1
+parameter
+gamma(r,i,v,t)   Unit: € per MWh per year: Variable O&M cost for technology i of vintage v in period t in district r;
+$GDXIN data.gdx
+$LOAD gamma
+$GDXIN
+options gamma:1:3:1
+display gamma
+;
+
+table tsigma(f,t)  fuel price    (unit: € per GJ)
+                2010    2015    2020     2025   2030   2035   2040   2045    2050
+co              1.8      2.2     2.6     2.6     2.7   2.9    3.1    3.3     3.5
+waste           1        1       1       1       1     1      1      1       1
+*biomass         2.5      2.5    2.5      2.5     2.5    2.5   2.5    2.5     2.5
+gas             5.4      6.2     6.9     7.1     7.3   7.2   7.2    7.1     7.0
+;
+
+table txi(r,i,v,t) residual capacity  (Unit: MW)
+                            2010
+ West-poort.Wind.old        0
+ West.Wind.old              0
+ Centrum.Solar-PV.old       0
+ Centrum.CAES.old           0.01
+ West-poort.Coal.old        0
+;
+
+table teta(j,f,v) fuel conversion efficiency
+
+                 old
+Coal.co          0.46
+*CCGT.gas         0.565
+*WtE-CHP.waste    0.24
+*WtE-CHP.biomass  0.50
+*Bio-CHP.biomass  0.29
+Biogas.waste    0.43
+;
+
+table tiota(store,v)   round trip efficiency %
+      old
+CAES  0.8
+;
+$call gdxxrw.exe data.xlsx par=D rng=Demand!A1:B5 rdim=1 cdim=1
+parameter
+D(tau,t)    Unit:MWh. energy demand in district r in time slice tau in year t     ;
+$GDXIN data.gdx
+$LOAD D
+$GDXIN
+display D
+;
+$call gdxxrw.exe data.xlsx par=Emax rng=emission!K1:T3 rdim=1 cdim=1
+parameter
+Emax(emi,t)    Unit:kton:  emission ceiling (kton)
+$GDXIN data.gdx
+$LOAD Emax
+$GDXIN
+display Emax
+;
+$call gdxxrw.exe data.xlsx par=zeta rng=zeta!A1:C6 rdim=1 cdim=1
+parameter
+zeta(a,emi)    Unit:kg per MWh. emission coefficiency of technology i ;
+$GDXIN data.gdx
+$LOAD zeta
+$GDXIN
+display zeta
+;
+$call gdxxrw.exe data.xlsx par=psi rng=psi!A1:F11 rdim=1 cdim=1
+parameter
+psi(v,i)    Unit:years.   technological life time of technology i   ;
+$GDXIN data.gdx
+$LOAD psi
+$GDXIN
+display psi
+;
+$call gdxxrw.exe data.xlsx par=w rng=w!A1:E6 rdim=1 cdim=1
+parameter
+w(i,tau)         Availability factor of technology i of vintage v in district r in time slice tau;
+$GDXIN data.gdx
+$LOAD w
+$GDXIN
+display w
+;
+
+scalars
+
+         kappa  depreciation rate /0.07/
+         rho    discount rate     /0.05/
+         s      time step         /5/
+         uc     unit converter    /1e-6/
+         epsilon unit converter   /3.6/
+         ;
+
+parameters
+
+
+         l(tau)          Length of time slice
+         /
+         low-day    2190
+         low-night  2190
+         high-day   2190
+         high-night 2190
+         /
+         eta(j,f,v)       Conversion efficiency
+         iota(store,v)    Roundtrip efficiency
+         sigma(f,t)       fuel f price in period t   unit EUR per GJ
+         xi(r,i,v,t)      residual capacity(base capacity)
+         val(t)           value of period t
+         vint(v)          value of vintage v
+         po(t)            export price of electricity in year t   MEUR per MWh
+         /
+         2010 42e-6
+         /
+         pi(t)            import price of electricity in year t     MEUR per MWh
+         /
+         2010 41e-6
+         /
+        ;
+
+         sigma(f,t)=1e-6*tsigma(f,t);
+         xi(r,i,"old","2010")=txi(r,i,"old","2010");
+         eta(j,f,v)=teta(j,f,v);
+         iota(store,v)=tiota(store,v);
+         val(t)=ord(t);
+         vint(v)=ord(v);
+
+         loop(v$(vint(v)<>1),
+         alpha(r,i,v+1)=alpha(r,i,v)
+         );
+         loop(t,
+         beta(r,i,v,t+1)=beta(r,i,v,t)*1.01;
+         gamma(r,i,v,t+1)=gamma(r,i,v,t)*1.01;
+         D(tau,t+1)=D(tau,t);
+         po(t+1)=po(t);
+         pi(t+1)=pi(t)
+         );
+
+         loop(v,
+         eta(j,f,v+1)=eta(j,f,v)+0.01*eta(j,f,v);
+         iota(store,v+1)=iota(store,v)+0.01*iota(store,v)
+         );
+
+         beta(r,i,v+1,t)$(vint(v)eq 1)=beta(r,i,v,t)-0.01*beta(r,i,v,t);
+         loop(v$(vint(v)<>1),
+         beta(r,i,v+1,t+1)=beta(r,i,v,t)-0.01*beta(r,i,v,t)
+         );
+         gamma(r,i,v+1,t)$(vint(v) eq 1)=gamma(r,i,v,t)*0.99;
+         loop(v$(vint(v) <>1),
+         gamma(r,i,v+1,t+1)=gamma(r,i,v,t)-0.01*gamma(r,i,v,t)
+         );
+
+option beta:0:3:1,gamma:3:3:1;
+display  rho,s,alpha,beta,gamma,l,sigma,pi,po,D,iota,eta,epsilon,w,zeta,psi,kappa,xi;
+positive variables
+         Cinv(t)          investment cost in period t
+         Com(t)           O&M cost in period t
+         Cfuel(t)         fuel cost in period t
+         Q(r,i,v)         additional capacity of technology i of vintage v in district r
+         K(r,i,v,t)       Total installed capacity of technology i of vintage v in period t in district r
+         G(r,a,v,tau,t)   Active capacity of technology a of vintage v in time slice tau in period t in district r
+         P(r,j,v,tau,f,t)     Fuel consumption that uses fuel f in time slice tau in period t in district r
+         export(r,tau,t)  export of electricity in time slice tau in district r in year t
+         import(r,tau,t)  import of electricity in time slice tau in district r in year t
+         Sin(r,store,v,tau,t) storage inflow in time slice tau in district r in year t
+         Sout(r,store,v,tau,t) storage outflow in time slice tau in district r in year t
+*        SL(r,store,v,tau,t)        storage level of storage technology store of vintage v in time slice tau in year t
+         E(r,t,emi)         CO2 equivalent emission in period t
+         Ktot(r,i,t)      Total capacity stock
+;
+
+variable
+         Ctrade(t)       profit from electricity trade (revenue of export minus cost of import)
+         NPV
+         ;
+
+
+
+equations
+         eq1    objective function
+         eq2    investment cost function
+         eq3    O&M cost function
+         eq4    fuel cost function
+         eq5    Net import function
+         eq6    supply and demand balance function
+         eq7    dynamics of energy storage
+*         eq7_1  inital value of energy storage level
+         eq8    energy storage balance function
+         eq9    storage level upper limit
+         eq10   fuel  consumption function
+         eq11   Capacity constraint for each technology of each vintage
+         eq12   emission calculation
+         eq13   emission allowance
+         eq14_1   capacity stock Eq.I
+         eq14_2   capacity stock Eq.II
+         eq14_3   capacity stock Eq.III
+         eq14_4   capacity stock Eq.IV
+         eq14_5   capacity stock Eq.V
+         eq14_6   capacity stock Eq.VI
+         eq15   total capacity  of all vintages
+         eq16   export constraint
+         eq17   import constraint
+
+;
+
+
+eq1..       NPV=e=sum(t,(1+rho)**(-(val(t)-1)*s)*(Cinv(t)+Com(t)+Cfuel(t)+Ctrade(t)));
+eq2(t,v)$(val(t)=vint(v)-1)..    Cinv(t)=e=sum((r,i),(alpha(r,i,v)*Q(r,i,v))) ;
+eq3(t)..     Com(t)=e=uc*(sum((r,i,v),(beta(r,i,v,t)*K(r,i,v,t)$(vint(v)-1 le val(t))))+sum((r,a,v,tau),(gamma(r,a,v,t)*l(tau)*G(r,a,v,tau,t)$(vint(v)-1 le val(t)))))+sum((r,store,v,tau),(gamma(r,store,v,t)*Sin(r,store,v,tau,t)$(vint(v)-1 le val(t)))) ;
+eq4(t)..     Cfuel(t)=e=sum((r,j,v,tau,f),(sigma(f,t)*P(r,j,v,tau,f,t)));
+eq5(t)..        Ctrade(t)=e=sum((r,tau),(pi(t)*import(r,tau,t)-po(t)*export(r,tau,t)));
+eq6(tau,t)..   D(tau,t)+sum(r,export(r,tau,t))+sum((r,store,v)$(vint(v)-1 le val(t)),Sin(r,store,v,tau,t)*l(tau))=e=sum((r,a,v),G(r,a,v,tau,t)$(vint(v)-1 le val(t))*l(tau))+sum(r,import(r,tau,t))+sum((r,store,v)$(vint(v)-1 le val(t)),Sout(r,store,v,tau,t)*l(tau));
+*eq7(r,store,v,tau,t)$(vint(v)-1 le val(t))..SL(r,store,v,tau,t) =e=SL(r,store,v,tau-1,t)+ l(tau)*(Sin(r,store,v,tau,t) -Sout(r,store,v,tau,t));
+*eq7_1(r,store,v,"low-day",t)..SL(r,store,v,"low-day",t)=e=xi(r,store,"old",t);
+eq7(r,store,v,t)..                 iota(store,v)*sum(tau,Sin(r,store,v,tau,t))=e=sum(tau,Sout(r,store,v,tau,t));
+eq8(r,store,v,tau,t)$(vint(v)-1 le val(t))..   Sin(r,store,v,tau,t)=l=K(r,store,v,t);
+eq9(r,store,v,tau,t)$(vint(v)-1 le val(t))..   Sout(r,store,v,tau,t)=l=K(r,store,v,t);
+eq10(r,j,v,tau,t)$(vint(v)-1 le val(t))..       sum(f,eta(j,f,v)*P(r,j,v,tau,f,t))=e=epsilon*G(r,j,v,tau,t)*l(tau);
+eq11(r,a,v,tau,t)$(vint(v)-1 le val(t))..       G(r,a,v,tau,t)=l=w(a,tau)*K(r,a,v,t);
+eq12(r,t,emi)..                E(r,t,emi)=e=uc*sum((a,v,tau),(zeta(a,emi)*l(tau)*G(r,a,v,tau,t)));
+eq13(emi,t)..              sum(r,E(r,t,emi))=l=Emax(emi,t);
+eq14_1(r,i,"old","2010")..  K(r,i,"old","2010")=e=xi(r,i,"old","2010");
+eq14_2(r,i,"old",t)$(val(t)>1 and val(t)<vint("old")+psi("old",i)/5)..   K(r,i,"old",t)-K(r,i,"old",t-1)*(1-kappa)=e=0;
+eq14_3(r,i,"old",t)$(val(t)>=vint("old")+psi("old",i)/5).. K(r,i,"old",t)=e=0;
+eq14_4(r,i,v,t)$(val(t)=vint(v)-1)..        K(r,i,v,t)=e= Q(r,i,v);
+eq14_5(r,i,v,t)$(vint(v)<>1 and val(t)> vint(v)-1 and val(t)<vint(v)-1+psi(v,i)/5)..       K(r,i,v,t)=e=K(r,i,v,t-1)*(1-kappa);
+eq14_6(r,i,v,t)$(val(t)<vint(v)-1 or (vint(v)<>1 and val(t)>=vint(v)-1+psi(v,i)/5))..K(r,i,v,t)=e=0;
+eq15(r,i,t)..  Ktot(r,i,t)=e=sum(v,K(r,i,v,t));
+eq16(r,tau,t)..  export(r,tau,t)=l=0;
+eq17(r,tau,t)..  import(r,tau,t)=l=0;
+
+model biobased/all/;
+
+solve biobased minimizing NPV using lp;
+
+option Q:3:2:1,G:3:4:1,K:3:3:1,Cinv:0:0:1;
+display Q.l,G.l,Cinv.l,K.l,Ktot.l,Com.l,import.l,export.l,Ctrade.l,Sin.l,Sout.l,E.l;
+
+execute_unload 'esmresults.gdx'Q.L,G.L,K.L,Ktot.L
+execute 'gdxxrw.exe esmresults.gdx var=Q.L rng=Sheet1!A1'
+execute 'gdxxrw.exe esmresults.gdx var=G.L rng=Sheet2!A1'
+execute 'gdxxrw.exe esmresults.gdx var=K.L rng=Sheet3!A1'
+execute 'gdxxrw.exe esmresults.gdx var=Ktot.L rng=Sheet4!A1'
+
+
+
+
+
+
+
